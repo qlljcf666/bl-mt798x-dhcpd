@@ -919,5 +919,9 @@ static int do_telnetd(struct cmd_tbl *cmdtp, int flag, int argc,
 U_BOOT_CMD(telnetd, 3, 0, do_telnetd,
 	"Control telnet server",
 	"start [port] - start telnet server (default port 23, or $telnet_port)\n"
-	"telnetd stop - stop telnet server"
+	"telnetd stop - stop telnet server\n\n"
+	"Environment:\n"
+	"  telnet_port - default port for telnetd (if not specified on command line)"
+	"  telnetd_enable - if set to a nonempty value, telnetd will start automatically on failsafe entry\n"
+	"					set 0/false/no/off to disable automatic start on failsafe entry"
 );

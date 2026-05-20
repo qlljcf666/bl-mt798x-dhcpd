@@ -330,6 +330,8 @@ fw_setenv failsafe 1 # Reboot to failsafe mode in next boot
 
 You can connect to the device with telnet, default port is 23, and you can set the `telnet_port` environment variable to change the port.
 
+TelnetD is enabled by default, but you can set the `telnetd_enable` environment variable to 0/false/no/off to disable it.
+
 ---
 
 <a id="ENDNOTE"></a>

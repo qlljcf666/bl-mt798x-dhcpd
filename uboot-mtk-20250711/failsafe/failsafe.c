@@ -1020,15 +1020,27 @@ int start_web_failsafe(void)
 #endif
 
 	if (IS_ENABLED(CONFIG_MTK_TELNETD)) {
+		const char *enable_str = env_get("telnet_enable");
 		const char *port_str = env_get("telnet_port");
 		unsigned long port = 23;
+		bool enable = true;
 
-		if (port_str) {
-			port = simple_strtoul(port_str, NULL, 10);
-			if (port < 1 || port > 65535)
-				port = 23;
+		/* Check if telnet is explicitly disabled */
+		if (enable_str) {
+			if (!strcmp(enable_str, "0") || !strcasecmp(enable_str, "false") ||
+			    !strcasecmp(enable_str, "no") || !strcasecmp(enable_str, "off")) {
+				enable = false;
+			}
 		}
-		mtk_telnetd_start((u16)port);
+
+		if (enable) {
+			if (port_str) {
+				port = simple_strtoul(port_str, NULL, 10);
+				if (port < 1 || port > 65535)
+					port = 23;
+			}
+			mtk_telnetd_start((u16)port);
+		}
 	}
 
 	failsafe_httpd_running = true;
