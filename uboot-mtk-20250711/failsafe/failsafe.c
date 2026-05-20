@@ -997,8 +997,6 @@ int start_web_failsafe(void)
 	httpd_register_uri_handler(inst, "/console/clear", &webconsole_clear_handler, NULL);
 #endif
 
-	if (IS_ENABLED(CONFIG_MTK_DHCPD))
-		mtk_dhcpd_start();
 	if (IS_ENABLED(CONFIG_MTK_TELNETD)) {
 		const char *port_str = env_get("telnet_port");
 		unsigned long port = 23;
@@ -1015,8 +1013,6 @@ int start_web_failsafe(void)
 	net_loop(MTK_TCP);
 	failsafe_httpd_running = false;
 
-	if (IS_ENABLED(CONFIG_MTK_DHCPD))
-		mtk_dhcpd_stop();
 	if (IS_ENABLED(CONFIG_MTK_TELNETD))
 		mtk_telnetd_stop();
 

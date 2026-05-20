@@ -771,3 +771,35 @@ void mtk_dhcpd_stop(void)
 	prev_udp_handler = NULL;
 	dhcpd_running = false;
 }
+
+bool mtk_dhcpd_is_running(void)
+{
+	return dhcpd_running;
+}
+
+static int do_dhcpd(struct cmd_tbl *cmdtp, int flag, int argc,
+		    char *const argv[])
+{
+	if (argc < 2)
+		return CMD_RET_USAGE;
+
+	if (!strcmp(argv[1], "start")) {
+		if (mtk_dhcpd_start())
+			printf("Failed to start DHCP server\n");
+
+		return CMD_RET_SUCCESS;
+	}
+
+	if (!strcmp(argv[1], "stop")) {
+		mtk_dhcpd_stop();
+		return CMD_RET_SUCCESS;
+	}
+
+	return CMD_RET_USAGE;
+}
+
+U_BOOT_CMD(dhcpd, 2, 0, do_dhcpd,
+	"Control DHCP server",
+	"start - start DHCP server\n"
+	"dhcpd stop - stop DHCP server"
+);
