@@ -16,6 +16,7 @@
  */
 
 #include <common.h>
+#include <env.h>
 #include <net.h>
 
 #include <net/mtk_dhcpd.h>
@@ -59,6 +60,9 @@ struct dhcpd_pkt {
 #define DHCPREQUEST		3
 #define DHCPNAK			6
 #define DHCPACK			5
+#define DHCPDECLINE		4
+#define DHCPRELEASE		7
+#define DHCPINFORM		8
 
 #define DHCP_OPTION_PAD			0
 #define DHCP_OPTION_SUBNET_MASK	1
@@ -93,6 +97,22 @@ static u32 next_ip_host;
 
 static rxhand_f *prev_udp_handler;
 static bool dhcpd_running;
+
+static bool dhcpd_is_verbose(void)
+{
+	const char *val = env_get("dhcpd_verbose");
+
+	if (!val || !val[0])
+		return false;
+
+	return !strcmp(val, "1") ||
+	       !strcasecmp(val, "true") ||
+	       !strcasecmp(val, "yes") ||
+	       !strcasecmp(val, "on");
+}
+
+#define dhcpd_log(fmt, ...) \
+	do { if (dhcpd_is_verbose()) printf(fmt, ##__VA_ARGS__); } while (0)
 
 static struct in_addr dhcpd_get_server_ip(void)
 {
@@ -263,8 +283,11 @@ static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 	u32 pool_size;
 
 	l = dhcpd_find_lease(mac);
-	if (l && dhcpd_ip_in_pool(ntohl(l->ip.s_addr)))
+	if (l && dhcpd_ip_in_pool(ntohl(l->ip.s_addr))) {
+		dhcpd_log("DHCP alloc: %pM already has lease %pI4\n",
+			  mac, &l->ip);
 		return l->ip;
+	}
 
 	dhcpd_get_pool_range(&start, &end);
 
@@ -598,6 +621,12 @@ static int dhcpd_send_reply(const struct dhcpd_pkt *req, unsigned int req_len,
 
 	net_send_packet(pkt, eth_hdr_size + IP_UDP_HDR_SIZE + payload_len);
 
+	dhcpd_log("DHCP %s to %pM yiaddr=%pI4 siaddr=%pI4\n",
+		  dhcp_msg_type == DHCPOFFER ? "OFFER" :
+		  dhcp_msg_type == DHCPACK   ? "ACK"   :
+		  dhcp_msg_type == DHCPNAK   ? "NAK"   : "?",
+		  req->chaddr, &yiaddr, &server_ip);
+
 	return 0;
 }
 
@@ -630,6 +659,16 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 	msg_type = dhcpd_parse_msg_type(bp, len);
 	if (!msg_type)
 		return;
+
+	dhcpd_log("DHCP %s from %pM xid=0x%08x",
+		  msg_type == DHCPDISCOVER ? "DISCOVER" :
+		  msg_type == DHCPREQUEST  ? "REQUEST"  :
+		  msg_type == DHCPDECLINE  ? "DECLINE"  :
+		  msg_type == DHCPRELEASE  ? "RELEASE"  :
+		  msg_type == DHCPINFORM   ? "INFORM"   : "?",
+		  bp->chaddr, ntohl(bp->xid));
+	dhcpd_log(" flags=0x%04x ciaddr=%pI4\n",
+		  ntohs(bp->flags), &bp->ciaddr);
 
 	debug_cond(DEBUG_DEV_PKT, "dhcpd: msg=%u from %pM\n", msg_type, bp->chaddr);
 
@@ -753,6 +792,23 @@ int mtk_dhcpd_start(void)
 
 	dhcpd_running = true;
 
+	dhcpd_log("DHCP server started\n");
+	dhcpd_log("  Server IP  : %pI4\n", &net_ip);
+	dhcpd_log("  Netmask    : %pI4\n", &net_netmask);
+	dhcpd_log("  Gateway    : %pI4\n", &net_gateway);
+	dhcpd_log("  DNS        : %pI4\n", &net_dns_server);
+	dhcpd_log("  Pool       : %d.%d.%d.%d - %d.%d.%d.%d\n",
+		  (pool_start_host >> 24) & 0xff,
+		  (pool_start_host >> 16) & 0xff,
+		  (pool_start_host >> 8) & 0xff,
+		  pool_start_host & 0xff,
+		  (pool_end_host >> 24) & 0xff,
+		  (pool_end_host >> 16) & 0xff,
+		  (pool_end_host >> 8) & 0xff,
+		  pool_end_host & 0xff);
+	dhcpd_log("  Leases     : %d max\n", DHCPD_MAX_CLIENTS);
+	dhcpd_log("  Verbose    : on (setenv dhcpd_verbose 0 to disable)\n");
+
 	return 0;
 }
 
@@ -770,6 +826,8 @@ void mtk_dhcpd_stop(void)
 		net_set_udp_handler(prev_udp_handler);
 	prev_udp_handler = NULL;
 	dhcpd_running = false;
+
+	dhcpd_log("DHCP server stopped\n");
 }
 
 bool mtk_dhcpd_is_running(void)
@@ -801,5 +859,8 @@ static int do_dhcpd(struct cmd_tbl *cmdtp, int flag, int argc,
 U_BOOT_CMD(dhcpd, 2, 0, do_dhcpd,
 	"Control DHCP server",
 	"start - start DHCP server\n"
-	"dhcpd stop - stop DHCP server"
+	"dhcpd stop - stop DHCP server\n\n"
+	"Environment:\n"
+	"  dhcpd_verbose  - set to 1/true/yes/on to enable detailed console output\n"
+	"                   (pool info, every DHCP request/reply, lease allocation)"
 );
