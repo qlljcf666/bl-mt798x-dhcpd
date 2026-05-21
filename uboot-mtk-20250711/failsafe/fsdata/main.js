@@ -678,6 +678,7 @@ function renderSysInfo() {
     let sysinfoData;
     let boardInfo;
     let ramInfo;
+    let mtdSummary;
     if (!sysinfoContainer) return;
     sysinfoData = APP_STATE.sysinfo;
     if (!sysinfoData) {
@@ -704,7 +705,7 @@ function renderSysInfo() {
     summary.appendChild(ramLine);
 
     if (sysinfoData.storage && sysinfoData.storage.mtd_layout) {
-        const mtdSummary = sysinfoData.storage.mtd_layout || {};
+        mtdSummary = sysinfoData.storage.mtd_layout || {};
         if (mtdSummary.current) {
             const curLayoutLine = document.createElement("div");
             curLayoutLine.className = "sysinfo-line";
