@@ -45,10 +45,12 @@ You can configure the features you need.
 ## Prepare
 
 ```bash
-sudo apt install gcc-aarch64-linux-gnu build-essential flex bison libssl-dev device-tree-compiler qemu-user-static
+sudo apt install gcc-aarch64-linux-gnu build-essential flex bison libssl-dev device-tree-compiler qemu-user-static nodejs npm
 ```
 
 > If you want to build for arm v7l devices, you also need to install `gcc-arm-linux-gnueabi`
+>
+> The failsafe web UI assets are minified at build time. If you build the U-Boot manually, run `npm install` once in `uboot-mtk-20250711/failsafe` so the local minifier dependency is available(It will auto install by `build.sh` tool).
 
 ## Build
 
