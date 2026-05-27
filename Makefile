@@ -53,9 +53,26 @@ ifeq ($(origin FSTHEME), undefined)
   endif
 endif
 
-ifeq ($(origin BOARD), undefined)
-  BOARD := $(call strip_quotes,$(CONFIG_BOARD))
+# Collect selected boards from .config (BOARD_*=y)
+# If BUILD_ALL_BOARDS=y, collect all board names dynamically
+# Otherwise, collect individual BOARD_*=y selections and resolve their display names
+ifeq ($(origin BOARDS), undefined)
+  ifeq ($(call config_bool,CONFIG_BUILD_ALL_BOARDS,n),y)
+    # Dynamically discover all boards from make boards
+    BOARDS := $(shell $(MAKE) --no-print-directory boards 2>/dev/null | sed 's/^  //')
+  else
+    # Collect individual BOARD_*=y selections from .config, then resolve display names from boards.kconfig
+    BOARDS := $(shell \
+      if [ -f '$(CONFIG_FILE)' ] && [ -f 'boards.kconfig' ]; then \
+        for sym in $$(grep '^CONFIG_BOARD_[A-Z0-9_]*=y$$' '$(CONFIG_FILE)' | sed 's/=y$$//'); do \
+          cfg_name=$${sym#CONFIG_}; \
+          awk "/^config $$cfg_name\$$/{found=1; next} found && /bool /{gsub(/\"/,\"\",\$$2); print \$$2; exit}" boards.kconfig; \
+        done; \
+      fi)
+  endif
 endif
+# For backward compatibility, set BOARD to the first selected board
+BOARD := $(firstword $(BOARDS))
 ifeq ($(origin ATFCFG_DIR), undefined)
   ATFCFG_DIR := $(if $(strip $(CONFIG_ATFCFG_DIR)),$(call strip_quotes,$(CONFIG_ATFCFG_DIR)),mt798x_atf)
 endif
@@ -109,7 +126,7 @@ ifeq ($(origin SDMMC), undefined)
   SDMMC := $(if $(filter y,$(call config_bool,CONFIG_SDMMC,n)),1,0)
 endif
 
-.PHONY: all build boards board-configs menuconfig atf gpt clean help
+.PHONY: all build boards board-configs gen-board-kconfig menuconfig atf gpt clean help
 
 build:
 	@set -euo pipefail; \
@@ -123,15 +140,44 @@ build:
 		exit 1; \
 	fi; \
 	if [[ "$$run_fip" -eq 1 ]]; then \
-		if [[ -z "$(BOARD)" ]]; then \
-			echo "Error: BOARD is not configured. Run 'make menuconfig' and set it, or pass BOARD=<board>." >&2; \
+		if [[ -z "$(BOARDS)" ]]; then \
+			echo "Error: no BOARD selected. Run 'make menuconfig' and select boards, or pass BOARD=<board>." >&2; \
 			exit 1; \
 		fi; \
-		printf '%s\n' "env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS BOARD=\"$(BOARD)\" VERSION=\"$(VERSION)\" VARIANT=\"$(VARIANT)\" FSTHEME=\"$(FSTHEME)\" MULTI_LAYOUT=\"$(MULTI_LAYOUT)\" FIXED_MTDPARTS=\"$(FIXED_MTDPARTS)\" SIMG=\"$(SIMG)\" COPY_BL2=\"$(COPY_BL2)\" SILENT=\"$(SILENT)\" ./build.sh"; \
-		env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS \
-		BOARD="$(BOARD)" VERSION="$(VERSION)" VARIANT="$(VARIANT)" FSTHEME="$(FSTHEME)" \
-		MULTI_LAYOUT="$(MULTI_LAYOUT)" FIXED_MTDPARTS="$(FIXED_MTDPARTS)" SIMG="$(SIMG)" \
-		COPY_BL2="$(COPY_BL2)" SILENT="$(SILENT)" ./build.sh; \
+		build_one_board() { \
+			local board="$$1"; \
+			local log_file="output/build-$${board}-$(VERSION)-$(VARIANT).log"; \
+			mkdir -p output; \
+			echo "----------------------------------------------------------------------"; \
+			echo "Building BOARD=$$board (VERSION=$(VERSION), VARIANT=$(VARIANT))"; \
+			echo "Log: $$log_file"; \
+			env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS \
+			BOARD="$$board" VERSION="$(VERSION)" VARIANT="$(VARIANT)" FSTHEME="$(FSTHEME)" \
+			MULTI_LAYOUT="$(MULTI_LAYOUT)" FIXED_MTDPARTS="$(FIXED_MTDPARTS)" SIMG="$(SIMG)" \
+			COPY_BL2="$(COPY_BL2)" SILENT="$(SILENT)" ./build.sh 2>&1 | tee "$$log_file"; \
+		}; \
+		success_count=0; \
+		fail_count=0; \
+		total_count=0; \
+		for board in $(BOARDS); do \
+			total_count=$$((total_count + 1)); \
+		done; \
+		index=0; \
+		for board in $(BOARDS); do \
+			index=$$((index + 1)); \
+			echo "[$$index/$$total_count] $$board"; \
+			if build_one_board "$$board"; then \
+				success_count=$$((success_count + 1)); \
+			else \
+				fail_count=$$((fail_count + 1)); \
+				echo "Build failed for BOARD=$$board, continuing..." >&2; \
+			fi; \
+		done; \
+		echo "----------------------------------------------------------------------"; \
+		echo "Build summary: success=$$success_count, failed=$$fail_count, total=$$total_count"; \
+		if [[ "$$fail_count" -gt 0 ]]; then \
+			exit 1; \
+		fi; \
 	fi; \
 	if [[ "$$run_atf" -eq 1 ]]; then \
 		printf '%s\n' "env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS ATF_DIR=\"$(ATF_DIR)\" VERSION=\"$(VERSION)\" VARIANT=\"$(VARIANT)\" ATFCFG_DIR=\"$(ATFCFG_DIR)\" CFG_SUBDIR=\"$(CFG_SUBDIR)\" OUTPUT_DIR=\"$(OUTPUT_DIR)\" TOOLCHAIN=\"$(TOOLCHAIN)\" ./compile_atf.sh"; \
@@ -148,11 +194,16 @@ build:
 
 menuconfig:
 	@set -euo pipefail; \
+	if [ ! -f "$(CURDIR)/boards.kconfig" ]; then \
+		$(MAKE) --no-print-directory gen-board-kconfig; \
+	fi; \
+	ln -sf "$(CURDIR)/boards.kconfig" "$(MENUCONFIG_UBOOT_DIR)/boards.kconfig"; \
 	printf '%s\n' "env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS KBUILD_KCONFIG=\"$(CURDIR)/Kconfig\" KCONFIG_CONFIG=\"$(CURDIR)/$(CONFIG_FILE)\" make -C \"$(MENUCONFIG_UBOOT_DIR)\" menuconfig"; \
 	env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS \
 	KBUILD_KCONFIG="$(CURDIR)/Kconfig" \
 	KCONFIG_CONFIG="$(CURDIR)/$(CONFIG_FILE)" \
-	$(MAKE) -C "$(MENUCONFIG_UBOOT_DIR)" menuconfig
+	$(MAKE) -C "$(MENUCONFIG_UBOOT_DIR)" menuconfig; \
+	rm -f "$(MENUCONFIG_UBOOT_DIR)/boards.kconfig"
 
 all:
 	@set -euo pipefail; \
@@ -269,6 +320,54 @@ board-configs:
 	mapfile -t board_cfgs < <(collect_board_configs); \
 	printf '%s\n' "$${board_cfgs[@]}"
 
+gen-board-kconfig:
+	@set -euo pipefail; \
+	case "$(VERSION)" in \
+		2025) ATF_DIR="atf-20250711"; UBOOT_DIR="uboot-mtk-20250711" ;; \
+		SP1|sp1) ATF_DIR="atf-20240117-bacca82a8"; UBOOT_DIR="uboot-mtk-20250711" ;; \
+		SP2|sp2) ATF_DIR="atf-20260123"; UBOOT_DIR="uboot-mtk-20250711" ;; \
+		*) echo "Error: unsupported VERSION='$(VERSION)'." >&2; exit 1 ;; \
+	esac; \
+	collect_board_configs() { \
+		local atf_cfg_dir="$$ATF_DIR/configs"; \
+		local uboot_cfg_dir="$$UBOOT_DIR/configs"; \
+		local atf_list uboot_list; \
+		atf_list="$$(mktemp)"; \
+		uboot_list="$$(mktemp)"; \
+		trap 'rm -f "$$atf_list" "$$uboot_list"' RETURN; \
+		find -L "$$atf_cfg_dir" -maxdepth 1 -type f -name '*_defconfig' -printf '%f\n' | sed 's/_defconfig$$//' | sort -u > "$$atf_list"; \
+		find -L "$$uboot_cfg_dir" -maxdepth 1 -type f -name '*_defconfig' -printf '%f\n' | sed 's/_defconfig$$//' | sort -u > "$$uboot_list"; \
+		comm -12 "$$atf_list" "$$uboot_list"; \
+	}; \
+	mapfile -t board_cfgs < <(collect_board_configs); \
+	if [[ "$${#board_cfgs[@]}" -eq 0 ]]; then \
+		echo "Error: no buildable BOARD found." >&2; \
+		exit 1; \
+	fi; \
+	out="boards.kconfig"; \
+	echo "# Auto-generated by: make gen-board-kconfig" > "$$out"; \
+	echo "# Do not edit manually. Regenerate with: make gen-board-kconfig" >> "$$out"; \
+	echo "" >> "$$out"; \
+	echo "menu \"Board selection\"" >> "$$out"; \
+	echo "" >> "$$out"; \
+	echo "config BUILD_ALL_BOARDS" >> "$$out"; \
+	echo "	bool \"Build all boards\"" >> "$$out"; \
+	echo "	default n" >> "$$out"; \
+	echo "	help" >> "$$out"; \
+	echo "	  When enabled, all discovered boards will be built." >> "$$out"; \
+	echo "	  Individual board selections below are ignored." >> "$$out"; \
+	echo "" >> "$$out"; \
+	for cfg in "$${board_cfgs[@]}"; do \
+		board_name="$${cfg#*_}"; \
+		sym_name=$$(echo "$$cfg" | tr '[:lower:]-' '[:upper:]_'); \
+		echo "config BOARD_$$sym_name" >> "$$out"; \
+		echo "	bool \"$$board_name\"" >> "$$out"; \
+		echo "	depends on !BUILD_ALL_BOARDS" >> "$$out"; \
+		echo "" >> "$$out"; \
+	done; \
+	echo "endmenu" >> "$$out"; \
+	echo "Generated $$out with $${#board_cfgs[@]} boards."
+
 atf:
 	@set -euo pipefail; \
 	printf '%s\n' "env -u MAKEFLAGS -u MAKELEVEL -u MFLAGS ATF_DIR=\"$(ATF_DIR)\" VERSION=\"$(VERSION)\" VARIANT=\"$(VARIANT)\" ATFCFG_DIR=\"$(ATFCFG_DIR)\" CFG_SUBDIR=\"$(CFG_SUBDIR)\" OUTPUT_DIR=\"$(OUTPUT_DIR)\" OC7981=\"$(OC7981)\" OC7986=\"$(OC7986)\" TOOLCHAIN=\"$(TOOLCHAIN)\" ./compile_atf.sh"; \
@@ -293,15 +392,20 @@ help:
 		'Quick build entry points' \
 		'' \
 		'Usage:' \
-		'  make                     # build the current .config selection' \
+		'  make                     # build the current .config selection (single or multi board)' \
 		'  make all                 # build all BOARDs found in the intersection of atf/configs and uboot/configs' \
-		'  make BOARD=<board>       # build a single BOARD' \
+		'  make BOARD=<board>       # build a single BOARD (override .config)' \
 		'  make menuconfig          # edit the root .config with a U-Boot-like menu UI' \
 		'  make atf                 # call compile_atf.sh' \
 		'  make gpt                 # call generate_gpt.sh' \
 		'  make boards              # list buildable BOARDs' \
 		'  make board-configs       # list buildable config names (for automation)' \
 		'  make help                # show this help' \
+		'' \
+		'Board selection (via menuconfig):' \
+		'  - Use "Build all boards" to select all boards at once' \
+		'  - Or individually toggle boards in the list (multi-select supported)' \
+		'  - boards.kconfig is auto-generated by: make gen-board-kconfig' \
 		'' \
 		'Common variables:' \
 		'  VERSION=2025|SP1|SP2' \

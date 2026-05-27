@@ -32,12 +32,7 @@ config VERSION_SP2
 	bool "SP2"
 endchoice
 
-config BOARD
-	string "Board name"
-	default ""
-	help
-	  Set the board name used by the default `make` target.
-	  Examples: cmcc_a10, sn_r1, or any board supported by the selected version.
+source "boards.kconfig"
 
 choice
 	prompt "Variant"
