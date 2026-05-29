@@ -284,15 +284,6 @@ config MTK_DHCPD_POOL_SIZE
 	help
 	  Pool size, e.g. 101 means .100 ~ .200.
 
-config MTK_DHCPD_ENHANCED
-	bool "Enhanced DHCP server behavior"
-	default y
-	depends on MTK_DHCPD
-	help
-	  Enable enhanced DHCPREQUEST validation and stable IP allocation.
-	  Adds Server Identifier checks, DHCPNAK support, and hash-based pool
-	  allocation with collision avoidance.
-
 config NET_FORCE_IPADDR
 	bool "Use ipaddr and netmask with CONFIG_IPADDR and CONFIG_NETMASK"
 	default n

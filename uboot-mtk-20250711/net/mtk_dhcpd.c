@@ -93,7 +93,6 @@ struct dhcpd_lease {
 };
 
 static struct dhcpd_lease leases[DHCPD_MAX_CLIENTS];
-static u32 next_ip_host;
 
 static rxhand_f *prev_udp_handler;
 static bool dhcpd_running;
@@ -250,7 +249,6 @@ static bool dhcpd_ip_in_pool(u32 ip_host)
 	return ip_host >= start && ip_host <= end;
 }
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 static bool dhcpd_ip_is_allocated(u32 ip_host)
 {
 	int i;
@@ -292,7 +290,6 @@ static u32 dhcpd_mac_hash(const u8 *mac)
 
 	return h;
 }
-#endif
 
 static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 {
@@ -313,7 +310,6 @@ static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 
 	pool_size = end >= start ? (end - start + 1) : 0;
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 	if (pool_size) {
 		u32 hash = dhcpd_mac_hash(mac);
 		u32 off = hash % pool_size;
@@ -326,27 +322,6 @@ static struct in_addr dhcpd_alloc_ip(const u8 *mac)
 			}
 		}
 	}
-#else
-	if (!next_ip_host)
-		next_ip_host = start;
-
-	for (i = 0; i < DHCPD_MAX_CLIENTS; i++) {
-		int idx;
-
-		idx = i;
-		if (!leases[idx].used) {
-			leases[idx].used = true;
-			memcpy(leases[idx].mac, mac, 6);
-			leases[idx].ip.s_addr = htonl(next_ip_host);
-
-			next_ip_host++;
-			if (next_ip_host > end)
-				next_ip_host = start;
-
-			return leases[idx].ip;
-		}
-	}
-#endif
 
 	/* No free slot: just return the first address in pool */
 	ip.s_addr = htonl(start);
@@ -454,7 +429,6 @@ static bool dhcpd_parse_req_ip(const struct dhcpd_pkt *bp, unsigned int len,
 	return false;
 }
 
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 static bool dhcpd_parse_server_id(const struct dhcpd_pkt *bp, unsigned int len,
 			      struct in_addr *server_ip)
 {
@@ -537,7 +511,6 @@ static bool dhcpd_same_subnet(struct in_addr a, struct in_addr b,
 {
 	return (a.s_addr & mask.s_addr) == (b.s_addr & mask.s_addr);
 }
-#endif
 
 static u8 *dhcpd_opt_add_u8(u8 *p, u8 code, u8 val)
 {
@@ -699,8 +672,6 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 		dhcpd_send_reply(bp, len, DHCPOFFER, yiaddr, NULL);
 		break;
 	case DHCPREQUEST:
-
-#ifdef CONFIG_MTK_DHCPD_ENHANCED
 		{
 			struct in_addr server_id;
 			struct in_addr server_ip = dhcpd_get_server_ip();
@@ -742,20 +713,6 @@ static void dhcpd_handle_packet(uchar *pkt, unsigned int dport,
 			dhcpd_process_lease(bp->chaddr, yiaddr);
 			dhcpd_send_reply(bp, len, DHCPACK, yiaddr, NULL);
 		}
-#else
-		/* If client requests a specific IP, validate it */
-		if (dhcpd_parse_req_ip(bp, len, &req_ip)) {
-			u32 ip_host = ntohl(req_ip.s_addr);
-			if (dhcpd_ip_in_pool(ip_host)) {
-				yiaddr = req_ip;
-			} else {
-				yiaddr = dhcpd_alloc_ip(bp->chaddr);
-			}
-		} else {
-			yiaddr = dhcpd_alloc_ip(bp->chaddr);
-		}
-		dhcpd_send_reply(bp, len, DHCPACK, yiaddr, NULL);
-#endif
 		break;
 	default:
 		break;
@@ -805,7 +762,6 @@ int mtk_dhcpd_start(void)
 
 	dhcpd_get_pool_range(&pool_start_host, &pool_end_host);
 	pool_start.s_addr = htonl(pool_start_host);
-	next_ip_host = ntohl(pool_start.s_addr);
 
 	prev_udp_handler = net_get_udp_handler();
 	net_set_udp_handler(dhcpd_udp_handler);
