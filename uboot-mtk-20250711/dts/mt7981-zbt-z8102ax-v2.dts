@@ -1,0 +1,44 @@
+/dts-v1/;
+#include "mt7981.dtsi"
+
+/ {
+    model = "ZBT Z8102AX V2";
+    compatible = "zbt,z8102ax-v2", "mediatek,mt7981";
+
+    aliases {
+        serial0 = &uart0;
+    };
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+    };
+};
+
+&uart0 {
+    status = "okay";
+};
+
+&nandc {
+    status = "okay";
+
+    nand@0 {
+        reg = <0>;
+        nand-use-ecc-placement-mode;
+        nand-ecc-step = 512;
+        nand-ecc-size = 72;
+        nand-on-flash-bbt;
+    };
+};
+
+&eth {
+    status = "okay";
+    mac-address = [00 00 00 00 00 00];
+};
+
+&mdio {
+    status = "okay";
+};
+
+&gpio {
+    status = "okay";
+};
